@@ -1,3 +1,9 @@
+// Package logg provides a simple, thread-safe logging wrapper for zerolog with dynamic redirection support.
+//
+// It allows for global initialization of logging levels and output destinations,
+// which can be changed at runtime even for loggers that have already been created.
+// It also encourages structured logging by providing package and component context
+// through the Ctx function.
 package logg
 
 import (
@@ -43,6 +49,7 @@ func SetKeys(pkg string, component string, event string, result string) {
 	KeyResult = result
 }
 
+// Init initializes the logger with the specified level and logs to os.Stderr.
 func Init(level string) {
 	InitWithWriters(level, os.Stderr)
 }
@@ -52,10 +59,12 @@ func InitConsole(level string) {
 	InitWithWriters(level, zerolog.ConsoleWriter{Out: os.Stderr})
 }
 
+// InitWithWriter initializes the logger with the specified level and output writer.
 func InitWithWriter(level string, w io.Writer) {
 	InitWithWriters(level, w)
 }
 
+// InitWithWriters initializes the logger with the specified level and multiple output writers.
 func InitWithWriters(level string, writers ...io.Writer) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	lvl, err := zerolog.ParseLevel(level)
