@@ -7,7 +7,7 @@ A thread-safe `zerolog` wrapper that supports global redirection.
 ## Quick Start
 
 ```go
-import "gitea.cyphix.dev/kade/logg"
+import "gitea.cyphix.dev/kade/go.logg"
 
 func main() {
     // Global setup
@@ -72,5 +72,5 @@ logger := logg.Ctx("auth", "ldap")
 ## Installation
 
 ```bash
-go get gitea.cyphix.dev/kade/logg
+go get gitea.cyphix.dev/kade/go.logg
 ```
