@@ -56,7 +56,7 @@ func Init(level string) {
 
 // InitConsole initializes the logger with a ConsoleWriter for pretty-printed, colored output.
 func InitConsole(level string) {
-	InitWithWriters(level, zerolog.ConsoleWriter{Out: os.Stderr})
+	InitWithWriters(level, &zerolog.ConsoleWriter{Out: os.Stderr})
 }
 
 // InitWithWriter initializes the logger with the specified level and output writer.
