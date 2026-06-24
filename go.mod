@@ -1,4 +1,4 @@
-module gitea.cyphix.dev/kade/go.logg
+module github.com/cyphix/gologg
 
 go 1.26.0
 
