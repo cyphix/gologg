@@ -1,5 +1,12 @@
 # Project Ignores
 
+# Logs
+*.log
+.cursor/debug*.log
+
+# pnpm store
+.pnpm-store/
+
 
 
 # IDE Ignores
