@@ -111,8 +111,8 @@ func (w ctxCallingWriter) Write(b []byte) (int, error) {
 }
 
 // A writer that calls back into the package must not deadlock behind a
-// pending SetKeys lock — regression coverage for proxyWriter releasing mu
-// before writing.
+// pending SetKeys lock — Ctx reads its keys without taking mu, so the
+// RLock held across proxyWriter.Write never re-enters the mutex.
 func TestWriterCallingCtxNoDeadlock(t *testing.T) {
 	defer SetSilent(false)
 	defer Init("info")

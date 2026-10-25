@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -18,9 +19,8 @@ import (
 var (
 	isSilent     bool
 	mu           sync.RWMutex
-	inFlight     sync.WaitGroup // writes that have snapshotted output but not finished
-	output       io.Writer      = os.Stderr
-	storedOutput io.Writer      = os.Stderr
+	output       io.Writer = os.Stderr
+	storedOutput io.Writer = os.Stderr
 
 	KeyPkg       = "pkg"
 	KeyComponent = "component"
@@ -28,24 +28,25 @@ var (
 	KeyResult    = "result"
 )
 
+// keySet is the atomically-swapped view of the key names Ctx stamps on
+// loggers. Ctx loads it without touching mu so a writer that calls Ctx
+// inside proxyWriter.Write cannot deadlock behind a pending Lock.
+type keySet struct {
+	pkg, component, event, result string
+}
+
+var ctxKeys atomic.Value // keySet
+
 type proxyWriter struct{}
 
 func (p *proxyWriter) Write(b []byte) (n int, err error) {
-	// Snapshot the destination under the lock but release it before writing:
-	// a writer that calls back into this package (Ctx, SetKeys, SetSilent)
-	// would otherwise deadlock behind a pending Lock. The Add happens under
-	// mu so a swap (InitWithWriters/SetSilent) that acquired mu after this
-	// RLock observes the write in its drain wait — after such a swap returns,
-	// no write still lands on the previous destination.
 	mu.RLock()
-	inFlight.Add(1)
-	w := output
-	mu.RUnlock()
-	defer inFlight.Done()
-	return w.Write(b)
+	defer mu.RUnlock()
+	return output.Write(b)
 }
 
 func init() {
+	ctxKeys.Store(keySet{KeyPkg, KeyComponent, KeyEvent, KeyResult})
 	log.Logger = log.Output(&proxyWriter{})
 }
 
@@ -57,6 +58,7 @@ func SetKeys(pkg string, component string, event string, result string) {
 	KeyComponent = component
 	KeyEvent = event
 	KeyResult = result
+	ctxKeys.Store(keySet{pkg, component, event, result})
 }
 
 // Init initializes the logger with the specified level and logs to os.Stderr.
@@ -84,6 +86,7 @@ func InitWithWriters(level string, writers ...io.Writer) {
 	zerolog.SetGlobalLevel(lvl)
 
 	mu.Lock()
+	defer mu.Unlock()
 
 	if len(writers) == 0 {
 		output = os.Stderr
@@ -97,36 +100,28 @@ func InitWithWriters(level string, writers ...io.Writer) {
 	if isSilent {
 		output = io.Discard
 	}
-	mu.Unlock()
-
-	// Drain outside mu so reentrant package calls from in-flight writers
-	// cannot deadlock; they observe the destination already swapped.
-	inFlight.Wait()
 }
 
 // SetSilent enables or disables silent mode.
 // In silent mode, all logs are discarded. When disabled, the previous writer is restored.
 func SetSilent(silent bool) {
 	mu.Lock()
+	defer mu.Unlock()
+
 	isSilent = silent
 	if silent {
 		output = io.Discard
 	} else {
 		output = storedOutput
 	}
-	mu.Unlock()
-
-	// Drain outside mu, as in InitWithWriters.
-	inFlight.Wait()
 }
 
 // Ctx returns a zerolog.Logger pre-configured with package and component context.
 // This preserves the full zerolog API while ensuring structured metadata is always present.
 func Ctx(pkg string, component string) zerolog.Logger {
-	mu.RLock()
-	defer mu.RUnlock()
+	k := ctxKeys.Load().(keySet)
 	return log.With().
-		Str(KeyPkg, pkg).
-		Str(KeyComponent, component).
+		Str(k.pkg, pkg).
+		Str(k.component, component).
 		Logger()
 }
