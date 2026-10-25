@@ -107,6 +107,8 @@ func SetSilent(silent bool) {
 // Ctx returns a zerolog.Logger pre-configured with package and component context.
 // This preserves the full zerolog API while ensuring structured metadata is always present.
 func Ctx(pkg string, component string) zerolog.Logger {
+	mu.RLock()
+	defer mu.RUnlock()
 	return log.With().
 		Str(KeyPkg, pkg).
 		Str(KeyComponent, component).
