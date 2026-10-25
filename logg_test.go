@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"sync"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -98,6 +99,30 @@ func TestSetKeys(t *testing.T) {
 	assert.Equal(t, "mycomp", result["c"])
 	assert.NotContains(t, result, "pkg")
 	assert.NotContains(t, result, "component")
+}
+
+// Ctx reads the key names configured by SetKeys; run them concurrently so
+// `go test -race` catches unsynchronized access.
+func TestCtxConcurrentWithSetKeys(t *testing.T) {
+	defer SetKeys("pkg", "component", "event", "result")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				SetKeys("pkg", "component", "event", "result")
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				_ = Ctx("test", "concurrent")
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestProxyWriterRedirection(t *testing.T) {
