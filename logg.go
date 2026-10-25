@@ -18,8 +18,9 @@ import (
 var (
 	isSilent     bool
 	mu           sync.RWMutex
-	output       io.Writer = os.Stderr
-	storedOutput io.Writer = os.Stderr
+	inFlight     sync.WaitGroup // writes that have snapshotted output but not finished
+	output       io.Writer      = os.Stderr
+	storedOutput io.Writer      = os.Stderr
 
 	KeyPkg       = "pkg"
 	KeyComponent = "component"
@@ -32,10 +33,15 @@ type proxyWriter struct{}
 func (p *proxyWriter) Write(b []byte) (n int, err error) {
 	// Snapshot the destination under the lock but release it before writing:
 	// a writer that calls back into this package (Ctx, SetKeys, SetSilent)
-	// would otherwise deadlock behind a pending Lock.
+	// would otherwise deadlock behind a pending Lock. The Add happens under
+	// mu so a swap (InitWithWriters/SetSilent) that acquired mu after this
+	// RLock observes the write in its drain wait — after such a swap returns,
+	// no write still lands on the previous destination.
 	mu.RLock()
+	inFlight.Add(1)
 	w := output
 	mu.RUnlock()
+	defer inFlight.Done()
 	return w.Write(b)
 }
 
@@ -78,7 +84,6 @@ func InitWithWriters(level string, writers ...io.Writer) {
 	zerolog.SetGlobalLevel(lvl)
 
 	mu.Lock()
-	defer mu.Unlock()
 
 	if len(writers) == 0 {
 		output = os.Stderr
@@ -92,20 +97,27 @@ func InitWithWriters(level string, writers ...io.Writer) {
 	if isSilent {
 		output = io.Discard
 	}
+	mu.Unlock()
+
+	// Drain outside mu so reentrant package calls from in-flight writers
+	// cannot deadlock; they observe the destination already swapped.
+	inFlight.Wait()
 }
 
 // SetSilent enables or disables silent mode.
 // In silent mode, all logs are discarded. When disabled, the previous writer is restored.
 func SetSilent(silent bool) {
 	mu.Lock()
-	defer mu.Unlock()
-
 	isSilent = silent
 	if silent {
 		output = io.Discard
 	} else {
 		output = storedOutput
 	}
+	mu.Unlock()
+
+	// Drain outside mu, as in InitWithWriters.
+	inFlight.Wait()
 }
 
 // Ctx returns a zerolog.Logger pre-configured with package and component context.
