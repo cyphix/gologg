@@ -22,6 +22,8 @@ var (
 	output       io.Writer = os.Stderr
 	storedOutput io.Writer = os.Stderr
 
+	// Structured-logging field names. Read-only for callers — mutate
+	// them with SetKeys, which also updates the snapshot Ctx reads.
 	KeyPkg       = "pkg"
 	KeyComponent = "component"
 	KeyEvent     = "event"
