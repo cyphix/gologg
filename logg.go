@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"sync"
-	"sync/atomic"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -22,22 +21,11 @@ var (
 	output       io.Writer = os.Stderr
 	storedOutput io.Writer = os.Stderr
 
-	// Structured-logging field names. Read-only for callers — mutate
-	// them with SetKeys, which also updates the snapshot Ctx reads.
 	KeyPkg       = "pkg"
 	KeyComponent = "component"
 	KeyEvent     = "event"
 	KeyResult    = "result"
 )
-
-// keySet is the atomically-swapped view of the key names Ctx stamps on
-// loggers. Ctx loads it without touching mu so a writer that calls Ctx
-// inside proxyWriter.Write cannot deadlock behind a pending Lock.
-type keySet struct {
-	pkg, component, event, result string
-}
-
-var ctxKeys atomic.Value // keySet
 
 type proxyWriter struct{}
 
@@ -48,7 +36,6 @@ func (p *proxyWriter) Write(b []byte) (n int, err error) {
 }
 
 func init() {
-	ctxKeys.Store(keySet{KeyPkg, KeyComponent, KeyEvent, KeyResult})
 	log.Logger = log.Output(&proxyWriter{})
 }
 
@@ -60,7 +47,6 @@ func SetKeys(pkg string, component string, event string, result string) {
 	KeyComponent = component
 	KeyEvent = event
 	KeyResult = result
-	ctxKeys.Store(keySet{pkg, component, event, result})
 }
 
 // Init initializes the logger with the specified level and logs to os.Stderr.
@@ -121,9 +107,10 @@ func SetSilent(silent bool) {
 // Ctx returns a zerolog.Logger pre-configured with package and component context.
 // This preserves the full zerolog API while ensuring structured metadata is always present.
 func Ctx(pkg string, component string) zerolog.Logger {
-	k := ctxKeys.Load().(keySet)
+	mu.RLock()
+	defer mu.RUnlock()
 	return log.With().
-		Str(k.pkg, pkg).
-		Str(k.component, component).
+		Str(KeyPkg, pkg).
+		Str(KeyComponent, component).
 		Logger()
 }
