@@ -30,9 +30,13 @@ var (
 type proxyWriter struct{}
 
 func (p *proxyWriter) Write(b []byte) (n int, err error) {
+	// Snapshot the destination under the lock but release it before writing:
+	// a writer that calls back into this package (Ctx, SetKeys, SetSilent)
+	// would otherwise deadlock behind a pending Lock.
 	mu.RLock()
-	defer mu.RUnlock()
-	return output.Write(b)
+	w := output
+	mu.RUnlock()
+	return w.Write(b)
 }
 
 func init() {

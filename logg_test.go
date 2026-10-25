@@ -101,6 +101,43 @@ func TestSetKeys(t *testing.T) {
 	assert.NotContains(t, result, "component")
 }
 
+type ctxCallingWriter struct {
+	inner io.Writer
+}
+
+func (w ctxCallingWriter) Write(b []byte) (int, error) {
+	_ = Ctx("re", "entrant")
+	return w.inner.Write(b)
+}
+
+// A writer that calls back into the package must not deadlock behind a
+// pending SetKeys lock — regression coverage for proxyWriter releasing mu
+// before writing.
+func TestWriterCallingCtxNoDeadlock(t *testing.T) {
+	defer SetSilent(false)
+	defer Init("info")
+	defer SetKeys("pkg", "component", "event", "result")
+
+	var buf bytes.Buffer
+	InitWithWriter("info", ctxCallingWriter{inner: &buf})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			SetKeys("pkg", "component", "event", "result")
+		}
+	}()
+
+	logger := Ctx("test", "reentrant")
+	for i := 0; i < 50; i++ {
+		logger.Info().Msg("reentrant log")
+	}
+	wg.Wait()
+	assert.Contains(t, buf.String(), "reentrant log")
+}
+
 // Ctx reads the key names configured by SetKeys; run them concurrently so
 // `go test -race` catches unsynchronized access.
 func TestCtxConcurrentWithSetKeys(t *testing.T) {
