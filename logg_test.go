@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -150,6 +151,48 @@ func TestInitWithInvalidLevel(t *testing.T) {
 	defer SetSilent(false)
 	InitWithWriters("invalid", io.Discard)
 	// Should default to InfoLevel
+}
+
+// A custom writer that reenters logg (e.g. calls Ctx) inside Write must not
+// deadlock against a concurrent SetSilent/SetKeys: if proxyWriter.Write held
+// mu.RLock during the call, the queued write lock would block Ctx's RLock.
+type reentrantWriter struct {
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (w *reentrantWriter) Write(b []byte) (int, error) {
+	w.once.Do(func() { close(w.entered) })
+	// Give the blocked write lock time to queue before Ctx takes RLock.
+	time.Sleep(20 * time.Millisecond)
+	_ = Ctx("inner", "writer")
+	return len(b), nil
+}
+
+func TestReentrantWriterDoesNotDeadlock(t *testing.T) {
+	defer SetSilent(false)
+	defer Init("info")
+
+	w := &reentrantWriter{entered: make(chan struct{})}
+	InitWithWriter("info", w)
+
+	go func() {
+		<-w.entered
+		SetSilent(true)
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		logger := Ctx("test", "reentrant")
+		logger.Info().Msg("x")
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("deadlock: reentrant writer blocked on the log lock")
+	}
 }
 
 func TestInitConsole(t *testing.T) {

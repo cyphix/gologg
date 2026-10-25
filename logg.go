@@ -31,8 +31,9 @@ type proxyWriter struct{}
 
 func (p *proxyWriter) Write(b []byte) (n int, err error) {
 	mu.RLock()
-	defer mu.RUnlock()
-	return output.Write(b)
+	w := output
+	mu.RUnlock()
+	return w.Write(b)
 }
 
 func init() {
